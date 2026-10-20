@@ -1,0 +1,86 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres   # local dev only; change for anything real
+      POSTGRES_DB: taskmesh
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d taskmesh"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: .
+    command: uvicorn taskmesh.api:app --host 0.0.0.0 --port 8000
+    environment:
+      TASKMESH_DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/taskmesh
+      TASKMESH_REDIS_URL: redis://redis:6379/0
+      TASKMESH_CORS_ORIGINS: http://localhost:8080
+      # TASKMESH_API_TOKEN: set-me-in-a-real-deployment
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://localhost:8000/ready')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    stop_grace_period: 15s
+
+  worker:
+    build: .
+    command: python -m taskmesh.worker
+    environment:
+      TASKMESH_DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/taskmesh
+      TASKMESH_REDIS_URL: redis://redis:6379/0
+      TASKMESH_WORKER_CONCURRENCY: "4"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    stop_grace_period: 15s
+
+  scheduler:
+    build: .
+    command: python -m taskmesh.scheduler
+    environment:
+      TASKMESH_DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/taskmesh
+      TASKMESH_REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+    stop_grace_period: 10s
+
+  dashboard:
+    image: python:3.12-alpine
+    command: python -m http.server 8080 --directory /srv
+    volumes:
+      - ./dashboard:/srv:ro
+    ports:
+      - "8080:8080"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:

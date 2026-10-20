@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "taskmesh"
+version = "0.1.0"
+description = "Background task execution and monitoring system for long-running, scheduled, prioritized and failure-prone workloads."
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.34.0",
+    "sqlalchemy==2.0.36",
+    "alembic==1.14.0",
+    "psycopg[binary]==3.2.3",
+    "redis==5.2.1",
+    "pydantic==2.10.4",
+    "pydantic-settings==2.7.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.4",
+    "pytest-asyncio==0.25.2",
+    "httpx==0.28.1",
+    "ruff==0.8.6",
+    "mypy==1.14.1",
+]
+
+[tool.setuptools]
+packages = ["taskmesh"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "integration: tests that require live PostgreSQL and Redis services",
+]
+
+[tool.ruff]
+line-length = 145
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+# `Depends()` in argument defaults is the idiomatic FastAPI pattern.
+"taskmesh/api.py" = ["B008"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+check_untyped_defs = true

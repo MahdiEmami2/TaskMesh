@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TaskMesh Dashboard</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --text:#e2e8f0; --muted:#94a3b8; --accent:#38bdf8;
+          --ok:#4ade80; --err:#f87171; --warn:#fbbf24; --border:#334155; }
+  * { box-sizing:border-box; margin:0; }
+  body { background:var(--bg); color:var(--text); font-family:system-ui,-apple-system,sans-serif; padding:24px; }
+  h1 { font-size:1.4rem; margin-bottom:4px; } .sub { color:var(--muted); font-size:.85rem; margin-bottom:20px; }
+  .banner { padding:10px 14px; border-radius:8px; margin-bottom:16px; display:none; font-size:.9rem; }
+  .banner.error { display:block; background:#450a0a; color:#fecaca; border:1px solid var(--err); }
+  .banner.loading { display:block; background:#1e3a5f; color:#bae6fd; }
+  .grid { display:grid; gap:14px; margin-bottom:20px; }
+  .grid.counts { grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); }
+  .grid.depth  { grid-template-columns:repeat(3,1fr); max-width:560px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:14px; }
+  .card .label { color:var(--muted); font-size:.75rem; text-transform:uppercase; letter-spacing:.05em; }
+  .card .value { font-size:1.7rem; font-weight:600; margin-top:4px; }
+  .v-PENDING{color:var(--warn)} .v-RUNNING{color:var(--accent)} .v-COMPLETED{color:var(--ok)}
+  .v-FAILED{color:var(--err)} .v-CANCELLED,.v-SCHEDULED,.v-RETRY_WAITING{color:var(--muted)}
+  .v-UNKNOWN{color:var(--err);font-size:1rem}
+  section { margin-bottom:26px; }
+  h2 { font-size:1.05rem; margin-bottom:10px; }
+  table { width:100%; border-collapse:collapse; font-size:.85rem; }
+  th,td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--border); }
+  th { color:var(--muted); font-weight:500; }
+  .badge { padding:2px 8px; border-radius:99px; font-size:.72rem; font-weight:600; }
+  .b-PENDING{background:#422006;color:#fbbf24} .b-SCHEDULED{background:#1e3a5f;color:#7dd3fc}
+  .b-RETRY_WAITING{background:#3b2f14;color:#fbbf24} .b-RUNNING{background:#0c4a6e;color:#7dd3fc}
+  .b-COMPLETED{background:#14532d;color:#86efac} .b-FAILED{background:#7f1d1d;color:#fca5a5}
+  .b-CANCELLED{background:#334155;color:#cbd5e1}
+  .b-HIGH{background:#7f1d1d;color:#fca5a5} .b-NORMAL{background:#334155;color:#cbd5e1} .b-LOW{background:#0f172a;color:#94a3b8}
+  .btn { border:none; border-radius:6px; padding:5px 10px; font-size:.75rem; cursor:pointer; margin:2px; background:#334155; color:var(--text); }
+  .btn:hover { filter:brightness(1.2); } .btn.danger{background:#7f1d1d} .btn.primary{background:#075985}
+  .btn:disabled{opacity:.4;cursor:not-allowed}
+  .toolbar { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; align-items:center; }
+  select,input { background:#0f172a; color:var(--text); border:1px solid var(--border); border-radius:6px; padding:6px 8px; font-size:.85rem; }
+  .empty { color:var(--muted); padding:18px; text-align:center; font-style:italic; }
+  .error-box { color:#fca5a5; padding:14px; background:#450a0a; border-radius:8px; }
+  .err-sum { font-size:.8rem; color:var(--muted); }
+  .pager { display:flex; gap:8px; align-items:center; margin-top:10px; font-size:.85rem; }
+  dialog { background:var(--card); color:var(--text); border:1px solid var(--border); border-radius:12px; max-width:720px; width:92%; padding:20px; }
+  dialog::backdrop { background:rgba(0,0,0,.6); }
+  pre { background:#0f172a; padding:10px; border-radius:8px; overflow:auto; font-size:.78rem; margin:8px 0; }
+  .detail-grid { display:grid; grid-template-columns:170px 1fr; gap:4px 12px; font-size:.85rem; }
+  .detail-grid div:nth-child(odd){color:var(--muted)}
+</style>
+</head>
+<body>
+<h1>TaskMesh Dashboard</h1>
+<div class="sub">Live data from the TaskMesh API &mdash; nothing here is hardcoded.</div>
+<div id="banner" class="banner"></div>
+
+<section>
+  <h2>Task counts by status</h2>
+  <div id="counts" class="grid counts"><div class="card"><div class="label">Loading&hellip;</div></div></div>
+</section>
+
+<section>
+  <h2>Queue depth by priority</h2>
+  <div id="depth" class="grid depth"><div class="card"><div class="label">Loading&hellip;</div></div></div>
+</section>
+
+<section>
+  <h2>Workers</h2>
+  <div id="workers" class="card">Loading&hellip;</div>
+</section>
+
+<section>
+  <h2>Error summaries (recent failures)</h2>
+  <div id="errors" class="card"><div class="empty">Loading&hellip;</div></div>
+</section>
+
+<section>
+  <h2>Recent tasks</h2>
+  <div class="toolbar">
+    <select id="f-status"><option value="">All statuses</option></select>
+    <select id="f-priority"><option value="">All priorities</option>
+      <option>HIGH</option><option>NORMAL</option><option>LOW</option></select>
+    <select id="f-type"><option value="">All types</option></select>
+    <button class="btn primary" onclick="loadTasks(0)">Apply filters</button>
+    <button class="btn" onclick="showSubmit()">+ Submit task</button>
+  </div>
+  <div id="tasks">Loading&hellip;</div>
+  <div class="pager">
+    <button class="btn" id="prev" onclick="page(-1)">&larr; Prev</button>
+    <span id="pageinfo"></span>
+    <button class="btn" id="next" onclick="page(1)">Next &rarr;</button>
+  </div>
+</section>
+
+<dialog id="detail"><div id="detail-body"></div>
+  <div style="margin-top:14px;text-align:right"><button class="btn" onclick="document.getElementById('detail').close()">Close</button></div>
+</dialog>
+
+<dialog id="submit-dlg">
+  <h2 style="margin-bottom:10px">Submit task</h2>
+  <div class="detail-grid">
+    <div>Task type</div><div><select id="s-type"></select></div>
+    <div>Priority</div><div><select id="s-priority"><option>NORMAL</option><option>HIGH</option><option>LOW</option></select></div>
+    <div>Payload (JSON)</div><div><input id="s-payload" style="width:100%" value='{"operation":"sum","n":1000}'></div>
+  </div>
+  <div style="margin-top:14px;text-align:right">
+    <button class="btn" onclick="document.getElementById('submit-dlg').close()">Cancel</button>
+    <button class="btn primary" onclick="submitTask()">Submit</button>
+  </div>
+</dialog>
+
+<script>
+const API = window.TASKMESH_API_URL || location.origin.replace(':8080', ':8000');
+let currentOffset = 0;
+const PAGE = 15;
+
+function banner(kind, msg) {
+  const b = document.getElementById('banner');
+  b.className = kind ? 'banner ' + kind : 'banner';
+  b.textContent = msg || '';
+}
+async function api(path, opts) {
+  const r = await fetch(API + path, opts);
+  if (!r.ok) {
+    let detail = r.statusText;
+    try { const j = await r.json(); detail = j.detail || JSON.stringify(j); } catch {}
+    throw new Error(`${r.status}: ${detail}`);
+  }
+  return r.json();
+}
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+async function loadStats() {
+  try {
+    const s = await api('/stats');
+    banner(null);
+    const counts = document.getElementById('counts');
+    counts.innerHTML = Object.entries(s.task_counts_by_status).map(([k, v]) =>
+      `<div class="card"><div class="label">${k}</div><div class="value v-${k}">${v}</div></div>`).join('');
+    document.getElementById('depth').innerHTML = Object.entries(s.queue_depth_by_priority).map(([k, v]) =>
+      `<div class="card"><div class="label">${k} queue</div><div class="value v-${k === 'HIGH' ? 'FAILED' : k === 'NORMAL' ? 'PENDING' : 'CANCELLED'}">${v}</div></div>`).join('');
+    const w = document.getElementById('workers');
+    if (s.active_workers === -1) {
+      w.innerHTML = '<span class="v-UNKNOWN">Worker registry unavailable (Redis unreachable) &mdash; unknown, not zero.</span>';
+    } else {
+      w.innerHTML = `<div class="value v-COMPLETED">${s.active_workers}</div>
+        <div class="label" style="margin-top:4px">active workers (heartbeat last 60s)</div>`;
+    }
+    const typeSel = document.getElementById('f-type');
+    if (typeSel.options.length <= 1) s.registered_task_types.forEach(t => typeSel.add(new Option(t)));
+    const err = document.getElementById('errors');
+    try {
+      const failed = await api(`/tasks?status=FAILED&limit=5`);
+      err.innerHTML = failed.items.length
+        ? failed.items.map(t => `<div style="margin-bottom:6px"><code>${esc(t.task_type)}</code> <span class="err-sum">${esc(t.last_error || 'no error detail')}</span></div>`).join('')
+        : '<div class="empty">No failed tasks. 🎉</div>';
+    } catch { err.innerHTML = '<div class="error-box">Could not load failed tasks.</div>'; }
+  } catch (e) {
+    banner('error', 'API unavailable — is the TaskMesh API running at ' + API + ' ? (' + e.message + ')');
+  }
+}
+
+async function loadTasks(offset = 0) {
+  currentOffset = offset;
+  const el = document.getElementById('tasks');
+  el.innerHTML = '<div class="empty">Loading&hellip;</div>';
+  const p = new URLSearchParams({ limit: PAGE, offset });
+  const st = document.getElementById('f-status').value; if (st) p.set('status', st);
+  const pr = document.getElementById('f-priority').value; if (pr) p.set('priority', pr);
+  const ty = document.getElementById('f-type').value; if (ty) p.set('task_type', ty);
+  try {
+    const data = await api('/tasks?' + p);
+    if (!data.items.length) { el.innerHTML = '<div class="empty">No tasks match the current filters.</div>'; }
+    else {
+      el.innerHTML = `<table><tr><th>ID</th><th>Type</th><th>Status</th><th>Prio</th><th>Attempts</th><th>Created</th><th>Duration</th><th>Actions</th></tr>` +
+        data.items.map(t => {
+          const dur = t.started_at && t.finished_at
+            ? ((new Date(t.finished_at) - new Date(t.started_at)) / 1000).toFixed(2) + 's' : '—';
+          const cancellable = ['PENDING', 'SCHEDULED', 'RETRY_WAITING', 'RUNNING'].includes(t.status);
+          const retryable = ['FAILED', 'RETRY_WAITING'].includes(t.status);
+          return `<tr onclick="showDetail('${t.id}')" style="cursor:pointer">
+            <td><code>${t.id.slice(0, 8)}…</code></td><td>${esc(t.task_type)}</td>
+            <td><span class="badge b-${t.status}">${t.status}</span></td>
+            <td><span class="badge b-${t.priority}">${t.priority}</span></td>
+            <td>${t.attempts}/${t.max_attempts}</td>
+            <td>${new Date(t.created_at).toLocaleString()}</td><td>${dur}</td>
+            <td onclick="event.stopPropagation()">
+              <button class="btn danger" ${cancellable ? '' : 'disabled'} onclick="cancelTask('${t.id}')">Cancel</button>
+              <button class="btn" ${retryable ? '' : 'disabled'} onclick="retryTask('${t.id}')">Retry</button>
+            </td></tr>`;
+        }).join('') + '</table>';
+    }
+    document.getElementById('pageinfo').textContent = `${offset + 1}–${offset + data.items.length} of ${data.total}`;
+    document.getElementById('prev').disabled = offset === 0;
+    document.getElementById('next').disabled = offset + PAGE >= data.total;
+  } catch (e) {
+    el.innerHTML = `<div class="error-box">Failed to load tasks: ${esc(e.message)}</div>`;
+  }
+}
+function page(delta) { loadTasks(Math.max(0, currentOffset + delta * PAGE)); }
+
+async function showDetail(id) {
+  const dlg = document.getElementById('detail');
+  document.getElementById('detail-body').innerHTML = '<div class="empty">Loading&hellip;</div>';
+  dlg.showModal();
+  try {
+    const [t, attempts] = await Promise.all([api('/tasks/' + id), api('/tasks/' + id + '/attempts')]);
+    const fmt = v => v ? new Date(v).toLocaleString() : '—';
+    document.getElementById('detail-body').innerHTML = `
+      <h2 style="margin-bottom:12px">Task <code>${esc(t.id)}</code></h2>
+      <div class="detail-grid">
+        <div>Type</div><div>${esc(t.task_type)}</div>
+        <div>Status</div><div><span class="badge b-${t.status}">${t.status}</span></div>
+        <div>Priority</div><div>${t.priority}</div>
+        <div>Attempts</div><div>${t.attempts} / ${t.max_attempts}</div>
+        <div>Created</div><div>${fmt(t.created_at)}</div>
+        <div>Started</div><div>${fmt(t.started_at)}</div>
+        <div>Finished</div><div>${fmt(t.finished_at)}</div>
+        <div>Run at (scheduled)</div><div>${fmt(t.run_at)}</div>
+        <div>Next retry</div><div>${fmt(t.next_retry_at)}</div>
+        <div>Leased by</div><div>${esc(t.leased_by || '—')}</div>
+        <div>Lease expires</div><div>${fmt(t.lease_expires_at)}</div>
+        <div>Last error</div><div>${esc(t.last_error || '—')}</div>
+        <div>Result</div><div><pre>${esc(JSON.stringify(t.result, null, 2))}</pre></div>
+        <div>Payload</div><div><pre>${esc(JSON.stringify(t.payload, null, 2))}</pre></div>
+      </div>
+      <h2 style="margin:14px 0 8px">Attempt history</h2>
+      ${attempts.length ? `<table><tr><th>#</th><th>Status</th><th>Started</th><th>Duration</th><th>Error</th></tr>` +
+        attempts.map(a => `<tr><td>${a.attempt_number}</td>
+          <td><span class="badge b-${a.status === 'SUCCEEDED' ? 'COMPLETED' : a.status === 'RUNNING' ? 'RUNNING' : 'FAILED'}">${a.status}</span></td>
+          <td>${fmt(a.started_at)}</td><td>${a.duration_ms != null ? a.duration_ms + ' ms' : '—'}</td>
+          <td class="err-sum">${esc(a.error || '')}</td></tr>`).join('') + '</table>'
+        : '<div class="empty">No attempts recorded yet.</div>'}`;
+  } catch (e) {
+    document.getElementById('detail-body').innerHTML = `<div class="error-box">${esc(e.message)}</div>`;
+  }
+}
+
+async function cancelTask(id) {
+  try { await api(`/tasks/${id}/cancel`, { method: 'POST' }); loadTasks(currentOffset); loadStats(); }
+  catch (e) { alert('Cancel failed: ' + e.message); }
+}
+async function retryTask(id) {
+  try { await api(`/tasks/${id}/retry`, { method: 'POST' }); loadTasks(currentOffset); loadStats(); }
+  catch (e) { alert('Retry failed: ' + e.message); }
+}
+async function showSubmit() {
+  const types = await api('/stats').then(s => s.registered_task_types).catch(() => ['compute']);
+  const sel = document.getElementById('s-type');
+  sel.innerHTML = types.map(t => `<option>${t}</option>`).join('');
+  document.getElementById('submit-dlg').showModal();
+}
+async function submitTask() {
+  const body = {
+    task_type: document.getElementById('s-type').value,
+    priority: document.getElementById('s-priority').value,
+  };
+  try { body.payload = JSON.parse(document.getElementById('s-payload').value); }
+  catch { alert('Payload is not valid JSON'); return; }
+  try {
+    await api('/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    document.getElementById('submit-dlg').close();
+    loadTasks(0); loadStats();
+  } catch (e) { alert('Submit failed: ' + e.message); }
+}
+
+// Populate status filter from the real state machine values.
+const STATUSES = ['PENDING', 'SCHEDULED', 'RETRY_WAITING', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED'];
+STATUSES.forEach(s => document.getElementById('f-status').add(new Option(s)));
+
+loadStats(); loadTasks(0);
+setInterval(loadStats, 5000);   // refresh stats + queue depth every 5s
+</script>
+</body>
+</html>
